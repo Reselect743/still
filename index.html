@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Still — meditation timer</title>
+<meta name="theme-color" content="#101319">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Still">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:      #101319;   /* night background */
+    --ink-2:    #171b23;   /* raised surface */
+    --bone:     #e8e4da;   /* primary text */
+    --ash:      #6d7280;   /* secondary text */
+    --bronze:   #c2a069;   /* singing-bowl brass */
+    --bronze-dim:#8a7350;
+    --ring-track:#242a35;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    background:radial-gradient(120% 90% at 50% 8%, #161b26 0%, var(--ink) 55%);
+    color:var(--bone);
+    font-family:'Inter',system-ui,sans-serif;
+    font-weight:300;
+    display:flex;flex-direction:column;align-items:center;
+    min-height:100vh;
+    user-select:none;
+  }
+  main{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    width:100%;max-width:480px;padding:24px;gap:0;
+  }
+  .wordmark{
+    letter-spacing:.55em;font-size:11px;color:var(--ash);
+    text-transform:uppercase;margin-bottom:6px;padding-left:.55em;
+  }
+  .wordmark b{color:var(--bronze);font-weight:400}
+
+  /* ——— bowl / ring ——— */
+  .bowl-wrap{position:relative;width:min(78vw,320px);aspect-ratio:1;margin:28px 0 20px}
+  .bowl-wrap svg{width:100%;height:100%;transform:rotate(-90deg);display:block}
+  .ring-track{fill:none;stroke:var(--ring-track);stroke-width:2}
+  .ring-arc{
+    fill:none;stroke:var(--bronze);stroke-width:2.5;stroke-linecap:round;
+    transition:stroke-dashoffset .3s linear, opacity .8s ease;
+  }
+  .bowl-center{
+    position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:2px;
+  }
+  .time-display{
+    font-family:'Cormorant Garamond',serif;font-weight:300;
+    font-size:clamp(56px,17vw,74px);line-height:1;
+    font-variant-numeric:tabular-nums;letter-spacing:.02em;
+  }
+  .time-sub{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--ash);padding-left:.3em}
+
+  /* breathing glow behind numerals while sitting */
+  .bowl-wrap::before{
+    content:"";position:absolute;inset:12%;border-radius:50%;
+    background:radial-gradient(circle,rgba(194,160,105,.10),transparent 65%);
+    opacity:0;transition:opacity 2s ease;pointer-events:none;
+  }
+  body.sitting .bowl-wrap::before{opacity:1;animation:breathe 9s ease-in-out infinite}
+  @keyframes breathe{0%,100%{transform:scale(.92)}50%{transform:scale(1.06)}}
+  @media (prefers-reduced-motion:reduce){
+    body.sitting .bowl-wrap::before{animation:none}
+    .ring-arc{transition:none}
+  }
+
+  /* ——— duration picker ——— */
+  .durations{display:flex;gap:10px;margin-bottom:30px}
+  .durations button{
+    background:none;border:1px solid var(--ring-track);color:var(--ash);
+    font-family:'Inter',sans-serif;font-weight:300;font-size:15px;
+    width:58px;height:58px;border-radius:50%;cursor:pointer;
+    transition:all .25s ease;font-variant-numeric:tabular-nums;
+  }
+  .durations button:hover{border-color:var(--bronze-dim);color:var(--bone)}
+  .durations button.selected{
+    border-color:var(--bronze);color:var(--bronze);
+    box-shadow:0 0 18px rgba(194,160,105,.15) inset;
+  }
+  .durations button:focus-visible{outline:2px solid var(--bronze);outline-offset:3px}
+
+  /* ——— primary action ——— */
+  .action{
+    background:none;border:1px solid var(--bronze-dim);color:var(--bone);
+    font-family:'Cormorant Garamond',serif;font-weight:400;font-style:italic;
+    font-size:20px;letter-spacing:.12em;
+    padding:13px 52px;border-radius:40px;cursor:pointer;
+    transition:all .3s ease;
+  }
+  .action:hover{border-color:var(--bronze);box-shadow:0 0 24px rgba(194,160,105,.12)}
+  .action:focus-visible{outline:2px solid var(--bronze);outline-offset:3px}
+  .action.quiet{border-color:var(--ring-track);color:var(--ash);font-size:16px;padding:10px 36px}
+  .action.quiet:hover{color:var(--bone);box-shadow:none;border-color:var(--ash)}
+
+  /* ——— session states ——— */
+  .idle-only,.sitting-only,.done-only{display:none}
+  body.idle    .idle-only{display:flex}
+  body.sitting .sitting-only{display:flex}
+  body.done    .done-only{display:flex}
+  body.idle    .idle-only.block, body.done .done-only.block{display:block}
+
+  .done-msg{
+    font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:300;
+    font-size:22px;color:var(--bone);margin-bottom:26px;text-align:center;
+  }
+  .done-msg span{color:var(--bronze)}
+
+  /* ——— footer stats ——— */
+  footer{
+    width:100%;max-width:480px;padding:0 24px 30px;
+    display:flex;justify-content:center;
+  }
+  .stats{
+    font-size:12.5px;letter-spacing:.06em;color:var(--ash);
+    border-top:1px solid var(--ring-track);padding-top:16px;width:100%;
+    text-align:center;line-height:1.7;
+  }
+  .stats strong{color:var(--bronze);font-weight:500;font-variant-numeric:tabular-nums}
+  body.sitting footer{opacity:.25;transition:opacity 1.5s ease}
+  .stats-block{width:100%}
+  .transfer{
+    text-align:center;font-size:11px;letter-spacing:.08em;color:var(--ash);
+    margin-top:8px;opacity:.65;
+  }
+  .transfer a,.import-label{
+    color:var(--ash);text-decoration:none;cursor:pointer;
+    border-bottom:1px dotted var(--ring-track);
+  }
+  .transfer a:hover,.import-label:hover{color:var(--bone)}
+  .transfer span{margin:0 8px}
+  #importFile{display:none}
+</style>
+</head>
+<body class="idle">
+<main>
+  <div class="wordmark">st<b>i</b>ll</div>
+
+  <div class="bowl-wrap">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <circle class="ring-track" cx="50" cy="50" r="46"/>
+      <circle class="ring-arc" id="arc" cx="50" cy="50" r="46"
+              stroke-dasharray="289.03" stroke-dashoffset="0"/>
+    </svg>
+    <div class="bowl-center">
+      <div class="time-display" id="timeDisplay">20:00</div>
+      <div class="time-sub" id="timeSub">minutes</div>
+    </div>
+  </div>
+
+  <div class="durations idle-only" id="durations" role="radiogroup" aria-label="Session length">
+    <button data-min="20" class="selected" role="radio" aria-checked="true">20</button>
+    <button data-min="30" role="radio" aria-checked="false">30</button>
+    <button data-min="45" role="radio" aria-checked="false">45</button>
+    <button data-min="60" role="radio" aria-checked="false">60</button>
+  </div>
+
+  <button class="action idle-only" id="beginBtn">Begin</button>
+  <button class="action quiet sitting-only" id="endEarlyBtn">End early</button>
+
+  <div class="done-only block" style="text-align:center">
+    <div class="done-msg" id="doneMsg">You sat for <span>20 minutes</span>.</div>
+    <button class="action" id="againBtn">Sit again</button>
+  </div>
+</main>
+
+<footer>
+  <div class="stats-block">
+    <div class="stats" id="stats">—</div>
+    <div class="transfer">
+      <a href="#" id="exportLink">Export stats</a>
+      <span aria-hidden="true">·</span>
+      <label for="importFile" class="import-label">Import stats</label>
+      <input type="file" id="importFile" accept="application/json,.json">
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ============================================================
+   Singing bowl synthesis — Web Audio
+   Voiced as a small hand bowl struck with a padded mallet, not a
+   cast church bell. What separates the two acoustically:
+     · Pitch — a hand bowl sits high (~E4–A4), a church bell low.
+     · Attack — felt on bronze rises over ~60–120 ms; there is no
+       hard metallic clang transient.
+     · Bloom — the near-octave partial swells slightly AFTER the
+       strike as the bowl's modes settle in.
+     · Spectrum — sparse and dark: a strong fundamental, one
+       shimmering near-octave, faint upper color; the whole thing
+       darkens further as it rings out (dynamic lowpass).
+     · Beating — slow (≈1 Hz) amplitude wobble from detuned
+       mode pairs, giving the characteristic "alive" sustain.
+   ============================================================ */
+let ctx = null;
+function audio() {
+  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+
+function strikeBowl(when = 0, fundamental = 392, level = 0.9) {
+  const ac = audio();
+  const t0 = ac.currentTime + when;
+
+  // Master chain: gain → lowpass that darkens as the ring decays
+  const master = ac.createGain();
+  master.gain.value = level * 0.5;
+  const lp = ac.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(3800, t0);
+  lp.frequency.exponentialRampToValueAtTime(1100, t0 + 9);
+  master.connect(lp).connect(ac.destination);
+
+  // Sparse, warm spectrum. attack = felt-mallet rise time;
+  // the 2.02 "stretched octave" partial blooms late and carries
+  // the shimmer that reads as "bowl" rather than "bell".
+  const partials = [
+    { ratio: 1.0,  gain: 1.00, decay: 13, beat: 0.9, attack: 0.06 },
+    { ratio: 2.02, gain: 0.34, decay: 10, beat: 1.4, attack: 0.14 },
+    { ratio: 2.72, gain: 0.10, decay: 7,  beat: 1.8, attack: 0.10 },
+    { ratio: 4.45, gain: 0.035,decay: 4,  beat: 2.3, attack: 0.05 },
+  ];
+
+  for (const p of partials) {
+    const f = fundamental * p.ratio;
+    for (const detune of [-p.beat / 2, p.beat / 2]) {
+      const osc = ac.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = f + detune;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(p.gain * 0.5, t0 + p.attack);
+      g.gain.exponentialRampToValueAtTime(0.00008, t0 + p.decay);
+      osc.connect(g).connect(master);
+      osc.start(t0);
+      osc.stop(t0 + p.decay + 0.1);
+    }
+  }
+
+  // Mallet contact: a soft, dark "thup" — heavily lowpassed noise,
+  // quiet enough to feel rather than hear.
+  const dur = 0.05;
+  const buf = ac.createBuffer(1, ac.sampleRate * dur, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
+  const noise = ac.createBufferSource();
+  noise.buffer = buf;
+  const nf = ac.createBiquadFilter();
+  nf.type = 'lowpass';
+  nf.frequency.value = 900;
+  const ng = ac.createGain();
+  ng.gain.setValueAtTime(0.09, t0);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  noise.connect(nf).connect(ng).connect(master);
+  noise.start(t0);
+}
+
+// End of session: the traditional three gentle strikes
+function closingBells() {
+  strikeBowl(0,   392, 0.85);
+  strikeBowl(4.0, 392, 0.75);
+  strikeBowl(8.0, 392, 0.9);
+}
+
+/* ============================================================
+   Persistence — storage adapter
+   Inside a Claude artifact, window.storage exists and localStorage
+   is blocked. As a standalone/hosted PWA it's the reverse. The
+   adapter tries the artifact API first, then localStorage, so the
+   same file runs correctly in both environments.
+   ============================================================ */
+const store = {
+  async get(k) {
+    if (window.storage) {
+      try { const r = await window.storage.get(k); return r ? r.value : null; }
+      catch (e) { return null; } // key doesn't exist yet
+    }
+    try { return localStorage.getItem(k); } catch (e) { return null; }
+  },
+  async set(k, v) {
+    if (window.storage) {
+      try { await window.storage.set(k, v); return; } catch (e) {}
+    }
+    try { localStorage.setItem(k, v); } catch (e) {}
+  },
+  async remove(k) {
+    if (window.storage) {
+      try { await window.storage.delete(k); return; } catch (e) {}
+    }
+    try { localStorage.removeItem(k); } catch (e) {}
+  }
+};
+
+const STORE_KEY = 'meditation-stats';
+const SESSION_KEY = 'meditation-active-session';
+let stats = { totalMinutes: 0, sessions: 0 };
+
+async function loadStats() {
+  const v = await store.get(STORE_KEY);
+  if (v) { try { stats = JSON.parse(v); } catch (e) {} }
+  renderStats();
+}
+async function saveStats() {
+  await store.set(STORE_KEY, JSON.stringify(stats));
+}
+
+/* Export / import — manual cross-device transfer of the tracker */
+function exportStats() {
+  const blob = new Blob([JSON.stringify({ ...stats, exported: new Date().toISOString() }, null, 2)],
+                        { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'still-stats.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function importStats(file) {
+  const r = new FileReader();
+  r.onload = async () => {
+    try {
+      const data = JSON.parse(r.result);
+      if (typeof data.totalMinutes === 'number' && typeof data.sessions === 'number') {
+        // Merge: imported device's history adds to this device's
+        stats.totalMinutes += data.totalMinutes;
+        stats.sessions += data.sessions;
+        await saveStats();
+        renderStats();
+      }
+    } catch (e) { console.error('import failed', e); }
+  };
+  r.readAsText(file);
+}
+function renderStats() {
+  const el = document.getElementById('stats');
+  if (stats.sessions === 0) {
+    el.innerHTML = 'No minutes logged yet. The bowl is waiting.';
+  } else {
+    const m = stats.totalMinutes.toLocaleString();
+    const s = stats.sessions;
+    el.innerHTML = `<strong>${m}</strong> minutes across <strong>${s}</strong> ${s === 1 ? 'sitting' : 'sittings'}`;
+  }
+}
+
+/* ============================================================
+   Timer — timestamp-based so a backgrounded tab stays accurate
+   ============================================================ */
+const CIRC = 2 * Math.PI * 46; // dasharray length
+let selectedMin = 20;
+let session = null; // { start, end, durationMin }
+let tickHandle = null;
+let wakeLock = null;
+
+const timeDisplay = document.getElementById('timeDisplay');
+const timeSub = document.getElementById('timeSub');
+const arc = document.getElementById('arc');
+
+function fmt(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function setState(name) {
+  document.body.className = name;
+}
+
+function selectDuration(min, btn) {
+  selectedMin = min;
+  document.querySelectorAll('#durations button').forEach(b => {
+    const on = b === btn;
+    b.classList.toggle('selected', on);
+    b.setAttribute('aria-checked', on);
+  });
+  timeDisplay.textContent = `${min}:00`;
+}
+
+document.querySelectorAll('#durations button').forEach(b => {
+  b.addEventListener('click', () => selectDuration(+b.dataset.min, b));
+});
+
+async function requestWake() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }
+  catch (e) { /* not critical */ }
+}
+function releaseWake() {
+  if (wakeLock) { wakeLock.release().catch(()=>{}); wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && session) requestWake();
+});
+
+function begin() {
+  audio(); // unlock audio inside the user gesture
+  strikeBowl(0.15, 392, 0.95);
+  const now = Date.now();
+  session = { start: now, end: now + selectedMin * 60000, durationMin: selectedMin };
+  store.set(SESSION_KEY, JSON.stringify(session));
+  setState('sitting');
+  timeSub.textContent = 'remaining';
+  requestWake();
+  tick();
+  tickHandle = setInterval(tick, 250);
+}
+
+/* If the tab was closed or reloaded mid-sit, restore the session.
+   The timer is timestamp-based, so no time is lost. One tap is
+   needed to re-unlock audio for the closing bell (browser rule:
+   sound requires a user gesture per page load). */
+async function resumeIfActive() {
+  const v = await store.get(SESSION_KEY);
+  if (!v) return;
+  let s;
+  try { s = JSON.parse(v); } catch (e) { return; }
+  if (!s || !s.end) { store.remove(SESSION_KEY); return; }
+
+  if (Date.now() >= s.end) {
+    // Session finished while the tab was away: log it in full
+    session = s;
+    stats.totalMinutes += s.durationMin;
+    stats.sessions += 1;
+    await saveStats();
+    renderStats();
+    store.remove(SESSION_KEY);
+    document.getElementById('doneMsg').innerHTML =
+      `You sat for <span>${s.durationMin} minutes</span>.`;
+    timeDisplay.textContent = fmt(0);
+    timeSub.textContent = 'complete';
+    arc.style.strokeDashoffset = CIRC;
+    session = null;
+    setState('done');
+  } else {
+    // Still mid-session: pick up where it left off
+    session = s;
+    selectedMin = s.durationMin;
+    setState('sitting');
+    timeSub.textContent = 'remaining';
+    requestWake();
+    tick();
+    tickHandle = setInterval(tick, 250);
+    // Re-unlock audio on the first interaction so the end bell rings
+    const unlock = () => { audio(); document.removeEventListener('pointerdown', unlock); };
+    document.addEventListener('pointerdown', unlock);
+  }
+}
+
+function tick() {
+  if (!session) return;
+  const remaining = (session.end - Date.now()) / 1000;
+  if (remaining <= 0) return complete(false);
+  timeDisplay.textContent = fmt(remaining);
+  const frac = remaining / (session.durationMin * 60);
+  arc.style.strokeDashoffset = (CIRC * (1 - frac)).toFixed(2);
+}
+
+async function complete(early) {
+  clearInterval(tickHandle);
+  releaseWake();
+  store.remove(SESSION_KEY);
+  const elapsedMin = Math.floor((Math.min(Date.now(), session.end) - session.start) / 60000);
+  const logged = early ? elapsedMin : session.durationMin;
+
+  if (early) strikeBowl(0.1, 392, 0.8); else closingBells();
+
+  if (logged > 0) {
+    stats.totalMinutes += logged;
+    stats.sessions += 1;
+    await saveStats();
+    renderStats();
+  }
+
+  document.getElementById('doneMsg').innerHTML =
+    logged > 0
+      ? `You sat for <span>${logged} minute${logged === 1 ? '' : 's'}</span>.`
+      : `A brief pause. Nothing logged under a minute.`;
+  timeDisplay.textContent = fmt(0);
+  timeSub.textContent = 'complete';
+  arc.style.strokeDashoffset = CIRC;
+  session = null;
+  setState('done');
+}
+
+function reset() {
+  setState('idle');
+  arc.style.strokeDashoffset = 0;
+  timeDisplay.textContent = `${selectedMin}:00`;
+  timeSub.textContent = 'minutes';
+}
+
+document.getElementById('beginBtn').addEventListener('click', begin);
+document.getElementById('endEarlyBtn').addEventListener('click', () => complete(true));
+document.getElementById('againBtn').addEventListener('click', reset);
+document.getElementById('exportLink').addEventListener('click', (e) => { e.preventDefault(); exportStats(); });
+document.getElementById('importFile').addEventListener('change', (e) => {
+  if (e.target.files[0]) importStats(e.target.files[0]);
+  e.target.value = '';
+});
+
+(async () => {
+  await loadStats();
+  await resumeIfActive();
+})();
+
+// Offline support — register the service worker (no-op inside the
+// Claude artifact sandbox, active when hosted as a real site)
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
