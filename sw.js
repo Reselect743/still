@@ -5,7 +5,7 @@
    first online load). After one online visit, the app is fully
    functional in airplane mode. */
 
-const CACHE = 'still-v2';
+const CACHE = 'still-v3';
 const SHELL = [
   './',
   './index.html',

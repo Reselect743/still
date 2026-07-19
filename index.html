@@ -91,6 +91,18 @@
   }
   .durations button:focus-visible{outline:2px solid var(--bronze);outline-offset:3px}
 
+  /* ——— sound picker (tap to audition) ——— */
+  .sounds{display:flex;gap:6px;margin:-14px 0 26px;flex-wrap:wrap;justify-content:center}
+  .sounds button{
+    background:none;border:1px solid transparent;color:var(--ash);
+    font-family:'Inter',sans-serif;font-weight:300;font-size:12px;
+    letter-spacing:.08em;padding:6px 13px;border-radius:20px;cursor:pointer;
+    transition:all .25s ease;
+  }
+  .sounds button:hover{color:var(--bone)}
+  .sounds button.selected{border-color:var(--ring-track);color:var(--bronze)}
+  .sounds button:focus-visible{outline:2px solid var(--bronze);outline-offset:2px}
+
   /* ——— primary action ——— */
   .action{
     background:none;border:1px solid var(--bronze-dim);color:var(--bone);
@@ -166,6 +178,14 @@
     <button data-min="60" role="radio" aria-checked="false">60</button>
   </div>
 
+  <div class="sounds idle-only" id="sounds" role="radiogroup" aria-label="Bell sound — tap to hear">
+    <button data-sound="bowl" class="selected" role="radio" aria-checked="true">Bowl</button>
+    <button data-sound="deep" role="radio" aria-checked="false">Deep</button>
+    <button data-sound="soft" role="radio" aria-checked="false">Soft</button>
+    <button data-sound="chime" role="radio" aria-checked="false">Chime</button>
+    <button data-sound="gong" role="radio" aria-checked="false">Gong</button>
+  </div>
+
   <button class="action idle-only" id="beginBtn">Begin</button>
   <button class="action quiet sitting-only" id="endEarlyBtn">End early</button>
 
@@ -205,36 +225,81 @@
    ============================================================ */
 let ctx = null;
 function audio() {
-  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!ctx) {
+    // iOS: declare ourselves "playback" audio (like a music app) so
+    // the hardware silent switch doesn't mute us. iOS 17+.
+    try { if ('audioSession' in navigator) navigator.audioSession.type = 'playback'; } catch (e) {}
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+  }
   if (ctx.state === 'suspended') ctx.resume();
   return ctx;
 }
 
-function strikeBowl(when = 0, fundamental = 392, level = 0.9) {
+/* Five voicings, one engine. Each preset is a physical description:
+   fundamental, spectrum (ratio/gain/decay/attack per partial),
+   mode-beating rates, a darkening lowpass sweep, and the mallet
+   contact noise. Audition them in the app; choice is persisted. */
+const SOUNDS = {
+  bowl: { label: 'Bowl', f: 392, master: 0.50, lp: [3800, 1100, 9],
+    partials: [
+      { ratio: 1.0,  gain: 1.00, decay: 13, beat: 0.9, attack: 0.06 },
+      { ratio: 2.02, gain: 0.34, decay: 10, beat: 1.4, attack: 0.14 },
+      { ratio: 2.72, gain: 0.10, decay: 7,  beat: 1.8, attack: 0.10 },
+      { ratio: 4.45, gain: 0.035,decay: 4,  beat: 2.3, attack: 0.05 },
+    ],
+    noise: { lp: 900, g: 0.09, d: 0.05 } },
+
+  deep: { label: 'Deep', f: 174, master: 0.55, lp: [2200, 700, 10],
+    partials: [
+      { ratio: 1.0,  gain: 1.00, decay: 18, beat: 0.6, attack: 0.09 },
+      { ratio: 2.01, gain: 0.22, decay: 12, beat: 1.0, attack: 0.18 },
+      { ratio: 2.72, gain: 0.05, decay: 8,  beat: 1.4, attack: 0.12 },
+    ],
+    noise: { lp: 600, g: 0.07, d: 0.06 } },
+
+  soft: { label: 'Soft', f: 523.25, master: 0.45, lp: [2400, 900, 7],
+    partials: [
+      { ratio: 1.0, gain: 1.00, decay: 9, beat: 0.8, attack: 0.10 },
+      { ratio: 2.0, gain: 0.12, decay: 6, beat: 1.2, attack: 0.15 },
+    ],
+    noise: { lp: 700, g: 0.05, d: 0.04 } },
+
+  chime: { label: 'Chime', f: 1975, master: 0.30, lp: [9000, 4000, 6],
+    partials: [
+      { ratio: 1.0,   gain: 1.00, decay: 7, beat: 3.2, attack: 0.008 },
+      { ratio: 1.503, gain: 0.40, decay: 6, beat: 4.1, attack: 0.008 },
+      { ratio: 2.02,  gain: 0.18, decay: 5, beat: 5.0, attack: 0.006 },
+    ],
+    noise: { lp: 6000, g: 0.05, d: 0.02 } },
+
+  gong: { label: 'Gong', f: 98, master: 0.60, lp: [1600, 500, 12],
+    partials: [
+      { ratio: 1.0,  gain: 1.00, decay: 16, beat: 1.2, attack: 0.40 },
+      { ratio: 1.52, gain: 0.50, decay: 12, beat: 2.2, attack: 0.60 },
+      { ratio: 2.15, gain: 0.35, decay: 10, beat: 3.1, attack: 0.80 },
+      { ratio: 2.90, gain: 0.20, decay: 8,  beat: 3.8, attack: 0.50 },
+      { ratio: 3.76, gain: 0.08, decay: 6,  beat: 4.4, attack: 0.30 },
+    ],
+    noise: { lp: 400, g: 0.12, d: 0.09 } },
+};
+
+let currentSound = 'bowl';
+
+function strikeBowl(when = 0, level = 0.9) {
+  const p0 = SOUNDS[currentSound] || SOUNDS.bowl;
   const ac = audio();
   const t0 = ac.currentTime + when;
 
-  // Master chain: gain → lowpass that darkens as the ring decays
   const master = ac.createGain();
-  master.gain.value = level * 0.5;
+  master.gain.value = level * p0.master;
   const lp = ac.createBiquadFilter();
   lp.type = 'lowpass';
-  lp.frequency.setValueAtTime(3800, t0);
-  lp.frequency.exponentialRampToValueAtTime(1100, t0 + 9);
+  lp.frequency.setValueAtTime(p0.lp[0], t0);
+  lp.frequency.exponentialRampToValueAtTime(p0.lp[1], t0 + p0.lp[2]);
   master.connect(lp).connect(ac.destination);
 
-  // Sparse, warm spectrum. attack = felt-mallet rise time;
-  // the 2.02 "stretched octave" partial blooms late and carries
-  // the shimmer that reads as "bowl" rather than "bell".
-  const partials = [
-    { ratio: 1.0,  gain: 1.00, decay: 13, beat: 0.9, attack: 0.06 },
-    { ratio: 2.02, gain: 0.34, decay: 10, beat: 1.4, attack: 0.14 },
-    { ratio: 2.72, gain: 0.10, decay: 7,  beat: 1.8, attack: 0.10 },
-    { ratio: 4.45, gain: 0.035,decay: 4,  beat: 2.3, attack: 0.05 },
-  ];
-
-  for (const p of partials) {
-    const f = fundamental * p.ratio;
+  for (const p of p0.partials) {
+    const f = p0.f * p.ratio;
     for (const detune of [-p.beat / 2, p.beat / 2]) {
       const osc = ac.createOscillator();
       osc.type = 'sine';
@@ -249,29 +314,28 @@ function strikeBowl(when = 0, fundamental = 392, level = 0.9) {
     }
   }
 
-  // Mallet contact: a soft, dark "thup" — heavily lowpassed noise,
-  // quiet enough to feel rather than hear.
-  const dur = 0.05;
-  const buf = ac.createBuffer(1, ac.sampleRate * dur, ac.sampleRate);
+  // Mallet contact noise, voiced per preset
+  const n = p0.noise;
+  const buf = ac.createBuffer(1, Math.max(1, ac.sampleRate * n.d), ac.sampleRate);
   const d = buf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
   const noise = ac.createBufferSource();
   noise.buffer = buf;
   const nf = ac.createBiquadFilter();
   nf.type = 'lowpass';
-  nf.frequency.value = 900;
+  nf.frequency.value = n.lp;
   const ng = ac.createGain();
-  ng.gain.setValueAtTime(0.09, t0);
-  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  ng.gain.setValueAtTime(n.g, t0);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t0 + n.d);
   noise.connect(nf).connect(ng).connect(master);
   noise.start(t0);
 }
 
 // End of session: the traditional three gentle strikes
 function closingBells() {
-  strikeBowl(0,   392, 0.85);
-  strikeBowl(4.0, 392, 0.75);
-  strikeBowl(8.0, 392, 0.9);
+  strikeBowl(0,   0.85);
+  strikeBowl(4.0, 0.75);
+  strikeBowl(8.0, 0.9);
 }
 
 /* ============================================================
@@ -403,7 +467,7 @@ document.addEventListener('visibilitychange', () => {
 
 function begin() {
   audio(); // unlock audio inside the user gesture
-  strikeBowl(0.15, 392, 0.95);
+  strikeBowl(0.15, 0.95);
   const now = Date.now();
   session = { start: now, end: now + selectedMin * 60000, durationMin: selectedMin };
   store.set(SESSION_KEY, JSON.stringify(session));
@@ -471,7 +535,7 @@ async function complete(early) {
   const elapsedMin = Math.floor((Math.min(Date.now(), session.end) - session.start) / 60000);
   const logged = early ? elapsedMin : session.durationMin;
 
-  if (early) strikeBowl(0.1, 392, 0.8); else closingBells();
+  if (early) strikeBowl(0.1, 0.8); else closingBells();
 
   if (logged > 0) {
     stats.totalMinutes += logged;
@@ -507,8 +571,33 @@ document.getElementById('importFile').addEventListener('change', (e) => {
   e.target.value = '';
 });
 
+/* Sound picker: tapping a voice previews it and selects it.
+   The tap is a user gesture, so this also unlocks audio on iOS. */
+const SOUND_KEY = 'meditation-sound';
+document.querySelectorAll('#sounds button').forEach(b => {
+  b.addEventListener('click', async () => {
+    currentSound = b.dataset.sound;
+    document.querySelectorAll('#sounds button').forEach(x => {
+      const on = x === b;
+      x.classList.toggle('selected', on);
+      x.setAttribute('aria-checked', on);
+    });
+    strikeBowl(0.05, 0.85);
+    await store.set(SOUND_KEY, currentSound);
+  });
+});
+
 (async () => {
   await loadStats();
+  const savedSound = await store.get(SOUND_KEY);
+  if (savedSound && SOUNDS[savedSound]) {
+    currentSound = savedSound;
+    document.querySelectorAll('#sounds button').forEach(x => {
+      const on = x.dataset.sound === savedSound;
+      x.classList.toggle('selected', on);
+      x.setAttribute('aria-checked', on);
+    });
+  }
   await resumeIfActive();
 })();
 
